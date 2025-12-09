@@ -1,6 +1,6 @@
 import express from 'express';
 import dotenv from 'dotenv';
-import { sequelize } from './config/db.js';
+import { sequelize } from './config/database.js';
 import authRoutes from './routes/authRoutes.js';
 
 dotenv.config();

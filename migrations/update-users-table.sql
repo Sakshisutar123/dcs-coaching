@@ -52,4 +52,3 @@ CREATE INDEX idx_users_uniqueId ON users(uniqueId);
 -- WHERE table_name = 'users' 
 -- ORDER BY ordinal_position;
 
-   

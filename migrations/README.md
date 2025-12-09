@@ -14,17 +14,12 @@ This folder contains database migration files for the My School Hub backend.
 
 ## Running Migrations
 
-### Option 1: Using Migration Runner (Recommended)
-```bash
-node migrations/migrate.js
-```
-
-### Option 2: Using Sequelize CLI (if installed)
+### Option 1: Using Sequelize CLI (Recommended)
 ```bash
 npx sequelize-cli db:migrate
 ```
 
-### Option 3: Manual SQL (pgAdmin)
+### Option 2: Manual SQL (pgAdmin)
 1. Open pgAdmin
 2. Connect to your database
 3. Open Query Tool
@@ -33,8 +28,8 @@ npx sequelize-cli db:migrate
 ## Migration Status
 
 Check which migrations have been executed:
-```sql
-SELECT * FROM "SequelizeMeta" ORDER BY name;
+```bash
+npx sequelize-cli db:migrate:status
 ```
 
 ## Rollback Migrations
@@ -44,10 +39,9 @@ To rollback the last migration:
 npx sequelize-cli db:migrate:undo
 ```
 
-Or manually:
-```sql
-DELETE FROM "SequelizeMeta" WHERE name = 'migration-file-name.js';
--- Then manually reverse the changes
+To rollback all migrations:
+```bash
+npx sequelize-cli db:migrate:undo:all
 ```
 
 ## Table Structure
@@ -74,4 +68,14 @@ The users table should have these columns:
 - Each migration file should export `up` and `down` functions
 - The `SequelizeMeta` table tracks executed migrations
 - Always backup your database before running migrations in production
+
+## Troubleshooting
+
+### Error: "Error reading database.js"
+- Make sure `src/config/database.config.js` exists
+- Check that `.sequelizerc` points to the correct config file
+
+### Error: "Cannot find module"
+- Make sure you're running migrations from the project root
+- Check that `node_modules` is installed (`npm install`)
 
