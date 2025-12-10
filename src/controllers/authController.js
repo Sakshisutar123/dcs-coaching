@@ -4,33 +4,30 @@ import otpGenerator from 'otp-generator';
 import dotenv from 'dotenv';
 dotenv.config();
 
-/* ----------------------- MAILERSEND (API EMAIL) ----------------------- */
-import { MailerSend, EmailParams, Sender } from "mailersend";
+/* ----------------------- BREVO (API EMAIL) ----------------------- */
+import brevo from '@getbrevo/brevo';
 
-const mailerSend = new MailerSend({
-  apiKey: process.env.MAILERSEND_API_KEY,
-});
+const apiInstance = new brevo.TransactionalEmailsApi();
+if (process.env.BREVO_API_KEY) {
+  apiInstance.setApiKey(brevo.TransactionalEmailsApiApiKeys.apiKey, process.env.BREVO_API_KEY);
+}
 
-// Validate MAIL_FROM is set and is an email
-const mailFrom = process.env.MAIL_FROM;
-const mailFromName = process.env.MAIL_FROM_NAME || "DCS Coaching";
-
-if (mailFrom && !mailFrom.includes('@')) {
+// Validate email configuration on startup
+if (process.env.MAIL_FROM && !process.env.MAIL_FROM.includes('@')) {
   console.error("⚠️  WARNING: MAIL_FROM should be an email address, not a name!");
-  console.error("⚠️  Current value:", mailFrom);
+  console.error("⚠️  Current value:", process.env.MAIL_FROM);
   console.error("⚠️  Example: MAIL_FROM=noreply@yourdomain.com");
 }
 
-const sentFrom = new Sender(
-  mailFrom,
-  mailFromName
-);
+if (!process.env.BREVO_API_KEY) {
+  console.warn("⚠️  WARNING: BREVO_API_KEY not set. Email sending will fail.");
+}
 
 async function sendEmail(to, subject, html) {
   try {
     // Validate email configuration
-    if (!process.env.MAILERSEND_API_KEY) {
-      console.error("❌ MAILERSEND_API_KEY not set");
+    if (!process.env.BREVO_API_KEY) {
+      console.error("❌ BREVO_API_KEY not set");
       return false;
     }
     
@@ -50,30 +47,33 @@ async function sendEmail(to, subject, html) {
       return false;
     }
 
-    const emailParams = new EmailParams()
-      .setFrom(sentFrom)
-      .setTo([{ email: to }])
-      .setSubject(subject)
-      .setHtml(html);
+    const sendSmtpEmail = new brevo.SendSmtpEmail();
+    sendSmtpEmail.subject = subject;
+    sendSmtpEmail.htmlContent = html;
+    sendSmtpEmail.sender = {
+      name: process.env.MAIL_FROM_NAME || "DCS Coaching",
+      email: process.env.MAIL_FROM
+    };
+    sendSmtpEmail.to = [{ email: to }];
 
-    await mailerSend.email.send(emailParams);
-    console.log("📧 MailerSend email sent to:", to);
+    await apiInstance.sendTransacEmail(sendSmtpEmail);
+    console.log("📧 Brevo email sent to:", to);
     return true;
   } catch (err) {
-    // Better error logging for MailerSend
+    // Better error logging for Brevo
     const errorDetails = {
       message: err.message || 'Unknown error',
       name: err.name,
       status: err.response?.status || err.statusCode,
       statusText: err.response?.statusText,
-      data: err.response?.data || err.body || err.data,
-      stack: err.stack,
+      body: err.response?.body || err.body,
+      text: err.response?.text,
       to: to,
       from: process.env.MAIL_FROM,
       fromName: process.env.MAIL_FROM_NAME
     };
     
-    console.error("❌ MailerSend error:", JSON.stringify(errorDetails, null, 2));
+    console.error("❌ Brevo error:", JSON.stringify(errorDetails, null, 2));
     console.error("❌ Full error object:", err);
     
     return false;
@@ -174,7 +174,7 @@ export const sendOtp = async (req, res) => {
     if (!emailSent) {
       // Check environment variables
       const envCheck = {
-        MAILERSEND_API_KEY: process.env.MAILERSEND_API_KEY ? '✅ Set' : '❌ Missing',
+        BREVO_API_KEY: process.env.BREVO_API_KEY ? '✅ Set' : '❌ Missing',
         MAIL_FROM: process.env.MAIL_FROM || '❌ Missing',
         MAIL_FROM_IS_EMAIL: process.env.MAIL_FROM?.includes('@') ? '✅ Valid' : '❌ Invalid (must be email address)',
         MAIL_FROM_NAME: process.env.MAIL_FROM_NAME || 'Not set (optional)',
@@ -183,7 +183,7 @@ export const sendOtp = async (req, res) => {
 
       return res.status(500).json({
         message: "Failed to send OTP",
-        error: "MailerSend API error",
+        error: "Brevo API error",
         debug: envCheck,
         hint: process.env.MAIL_FROM && !process.env.MAIL_FROM.includes('@') 
           ? "MAIL_FROM must be an email address (e.g., noreply@yourdomain.com), not a name"
@@ -251,45 +251,55 @@ export const setPassword = async (req, res) => {
 export const testEmailConfig = async (req, res) => {
   try {
     const config = {
-      MAILERSEND_API_KEY: process.env.MAILERSEND_API_KEY ? '✅ Set' : '❌ Missing',
+      BREVO_API_KEY: process.env.BREVO_API_KEY ? '✅ Set' : '❌ Missing',
       MAIL_FROM: process.env.MAIL_FROM || '❌ Missing',
+      MAIL_FROM_IS_EMAIL: process.env.MAIL_FROM?.includes('@') ? '✅ Valid' : '❌ Invalid',
       MAIL_FROM_NAME: process.env.MAIL_FROM_NAME || 'Not set (optional)',
     };
 
-    if (!process.env.MAILERSEND_API_KEY) {
+    if (!process.env.BREVO_API_KEY) {
       return res.status(400).json({
-        message: "MailerSend configuration incomplete",
+        message: "Brevo configuration incomplete",
         config: config,
-        error: "MAILERSEND_API_KEY is required",
-        hint: "Add MAILERSEND_API_KEY to Render environment variables"
+        error: "BREVO_API_KEY is required",
+        hint: "Add BREVO_API_KEY to Render environment variables"
       });
     }
 
     if (!process.env.MAIL_FROM) {
       return res.status(400).json({
-        message: "MailerSend configuration incomplete",
+        message: "Brevo configuration incomplete",
         config: config,
         error: "MAIL_FROM is required",
         hint: "Add MAIL_FROM to Render environment variables (e.g., noreply@yourdomain.com)"
       });
     }
 
+    if (!process.env.MAIL_FROM.includes('@')) {
+      return res.status(400).json({
+        message: "Brevo configuration invalid",
+        config: config,
+        error: "MAIL_FROM must be an email address",
+        hint: "Change MAIL_FROM to an email address (e.g., noreply@yourdomain.com)"
+      });
+    }
+
     const test = await sendEmail(
       process.env.MAIL_FROM,
-      "MailerSend Test Email",
-      "<p>Your MailerSend integration works!</p>"
+      "Brevo Test Email",
+      "<p>Your Brevo integration works!</p>"
     );
 
     if (!test) {
       return res.status(500).json({
-        message: "MailerSend test failed",
+        message: "Brevo test failed",
         config: config,
         hint: "Check server logs for detailed error message"
       });
     }
 
     res.json({
-      message: "MailerSend configuration valid",
+      message: "Brevo configuration valid",
       config: config,
       status: "ready",
     });
