@@ -17,7 +17,7 @@ export const sendEmail = async (to, subject, html) => {
     });
     return true;
   } catch (err) {
-    console.error("MailerSend API error:", err);
+    console.error("MailerSend API error:", err.response ? err.response.data : err);
     return false;
   }
 };
