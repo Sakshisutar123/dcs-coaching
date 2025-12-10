@@ -18,6 +18,22 @@ const sentFrom = new Sender(
 
 async function sendEmail(to, subject, html) {
   try {
+    // Validate email configuration
+    if (!process.env.MAILERSEND_API_KEY) {
+      console.error("❌ MAILERSEND_API_KEY not set");
+      return false;
+    }
+    
+    if (!process.env.MAIL_FROM) {
+      console.error("❌ MAIL_FROM not set");
+      return false;
+    }
+    
+    if (!to || !to.includes('@')) {
+      console.error("❌ Invalid recipient email:", to);
+      return false;
+    }
+
     const emailParams = new EmailParams()
       .setFrom(sentFrom)
       .setTo([{ email: to }])
@@ -25,10 +41,17 @@ async function sendEmail(to, subject, html) {
       .setHtml(html);
 
     await mailerSend.email.send(emailParams);
-    console.log("📧 MailerSend email sent!");
+    console.log("📧 MailerSend email sent to:", to);
     return true;
   } catch (err) {
     console.error("❌ MailerSend error:", err.message);
+    console.error("❌ Error details:", {
+      message: err.message,
+      status: err.response?.status,
+      data: err.response?.data,
+      to: to,
+      from: process.env.MAIL_FROM
+    });
     return false;
   }
 }
@@ -88,9 +111,24 @@ export const checkUser = async (req, res) => {
 export const sendOtp = async (req, res) => {
   try {
     const { uniqueId } = req.body;
+    
+    if (!uniqueId) {
+      return res.status(400).json({ message: 'uniqueId is required' });
+    }
+    
     const user = await User.findOne({ where: { uniqueId } });
 
-    if (!user) return res.status(404).json({ message: 'User not found' });
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Check if user has email
+    if (!user.email) {
+      return res.status(400).json({ 
+        message: 'User email not found',
+        error: 'User does not have an email address configured'
+      });
+    }
 
     const otp = otpGenerator.generate(6, {
       upperCaseAlphabets: false,
@@ -101,6 +139,8 @@ export const sendOtp = async (req, res) => {
     user.otpExpiry = new Date(Date.now() + 5 * 60 * 1000);
     await user.save();
 
+    console.log(`📤 Attempting to send OTP to: ${user.email}`);
+
     const emailSent = await sendEmail(
       user.email,
       "OTP Verification",
@@ -108,18 +148,33 @@ export const sendOtp = async (req, res) => {
     );
 
     if (!emailSent) {
+      // Check environment variables
+      const envCheck = {
+        MAILERSEND_API_KEY: process.env.MAILERSEND_API_KEY ? '✅ Set' : '❌ Missing',
+        MAIL_FROM: process.env.MAIL_FROM || '❌ Missing',
+        MAIL_FROM_NAME: process.env.MAIL_FROM_NAME || 'Not set (optional)',
+        userEmail: user.email || '❌ Missing'
+      };
+
       return res.status(500).json({
         message: "Failed to send OTP",
         error: "MailerSend API error",
+        debug: envCheck,
+        hint: "Check server logs for detailed error message"
       });
     }
 
-    res.json({ message: "OTP sent successfully" });
+    res.json({ 
+      message: "OTP sent successfully",
+      email: user.email 
+    });
 
   } catch (err) {
+    console.error('Send OTP error:', err);
     res.status(500).json({
       message: "Error sending OTP",
       error: err.message,
+      stack: process.env.NODE_ENV !== 'production' ? err.stack : undefined
     });
   }
 };
@@ -168,10 +223,27 @@ export const setPassword = async (req, res) => {
 /* ---------------------------- 5️⃣ TEST EMAIL CONFIG ---------------------------- */
 export const testEmailConfig = async (req, res) => {
   try {
+    const config = {
+      MAILERSEND_API_KEY: process.env.MAILERSEND_API_KEY ? '✅ Set' : '❌ Missing',
+      MAIL_FROM: process.env.MAIL_FROM || '❌ Missing',
+      MAIL_FROM_NAME: process.env.MAIL_FROM_NAME || 'Not set (optional)',
+    };
+
     if (!process.env.MAILERSEND_API_KEY) {
       return res.status(400).json({
-        message: "MailerSend key missing",
-        error: "Add MAILERSEND_API_KEY in .env",
+        message: "MailerSend configuration incomplete",
+        config: config,
+        error: "MAILERSEND_API_KEY is required",
+        hint: "Add MAILERSEND_API_KEY to Render environment variables"
+      });
+    }
+
+    if (!process.env.MAIL_FROM) {
+      return res.status(400).json({
+        message: "MailerSend configuration incomplete",
+        config: config,
+        error: "MAIL_FROM is required",
+        hint: "Add MAIL_FROM to Render environment variables (e.g., noreply@yourdomain.com)"
       });
     }
 
@@ -184,19 +256,23 @@ export const testEmailConfig = async (req, res) => {
     if (!test) {
       return res.status(500).json({
         message: "MailerSend test failed",
+        config: config,
+        hint: "Check server logs for detailed error message"
       });
     }
 
     res.json({
       message: "MailerSend configuration valid",
-      email: process.env.MAIL_FROM,
+      config: config,
       status: "ready",
     });
 
   } catch (err) {
+    console.error('Test email config error:', err);
     res.status(500).json({
       message: "Email config error",
       error: err.message,
+      stack: process.env.NODE_ENV !== 'production' ? err.stack : undefined
     });
   }
 };
