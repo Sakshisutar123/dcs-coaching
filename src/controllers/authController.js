@@ -37,15 +37,50 @@ async function sendEmail(to, subject, html) {
 export const checkUser = async (req, res) => {
   try {
     const { uniqueId } = req.body;
+    
+    // Check if table exists first
+    const tableExists = await User.sequelize.query(
+      `SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_name = 'users'
+      )`,
+      { type: User.sequelize.QueryTypes.SELECT }
+    );
+    
+    if (!tableExists[0]?.exists) {
+      return res.status(500).json({ 
+        message: 'Database table missing', 
+        error: 'Users table does not exist. Please run migrations or create the table.',
+        hint: 'Run: CREATE TABLE users (...) or set SYNC_DB=true in environment variables'
+      });
+    }
+    
     const user = await User.findOne({ where: { uniqueId } });
 
-    if (!user) return res.status(404).json({ message: 'User not found' });
+    if (!user) {
+      // Check if any users exist
+      const userCount = await User.count();
+      return res.status(404).json({ 
+        message: 'User not found',
+        debug: {
+          searchedUniqueId: uniqueId,
+          totalUsersInDatabase: userCount,
+          hint: userCount === 0 ? 'No users in database. Add a user first.' : `User with uniqueId "${uniqueId}" does not exist.`
+        }
+      });
+    }
+    
     if (user.isRegistered)
       return res.status(400).json({ message: 'User already registered' });
 
     res.json({ message: 'User found', email: user.email });
   } catch (err) {
-    res.status(500).json({ message: 'Server error', error: err.message });
+    console.error('Check user error:', err);
+    res.status(500).json({ 
+      message: 'Server error', 
+      error: err.message,
+      stack: process.env.NODE_ENV !== 'production' ? err.stack : undefined
+    });
   }
 };
 
