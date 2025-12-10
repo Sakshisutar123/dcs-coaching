@@ -18,6 +18,13 @@ export const connectDB = async () => {
   try {
     await sequelize.authenticate();
     console.log('✅ PostgreSQL connected');
+    
+    // Sync database in production (creates tables if they don't exist)
+    // Set SYNC_DB=true in environment variables to enable
+    if (process.env.SYNC_DB === 'true' || process.env.NODE_ENV !== 'production') {
+      await sequelize.sync({ alter: false });
+      console.log('✅ Database tables synced');
+    }
   } catch (error) {
     console.error('❌ DB connection error:', error.message);
   }
