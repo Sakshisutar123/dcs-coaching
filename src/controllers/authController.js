@@ -15,23 +15,16 @@ const mailerSend = new MailerSend({
 const mailFrom = process.env.MAIL_FROM;
 const mailFromName = process.env.MAIL_FROM_NAME || "DCS Coaching";
 
-if (!mailFrom) {
-  console.error("❌ MAIL_FROM environment variable is not set!");
-} else if (!mailFrom.includes('@')) {
+if (mailFrom && !mailFrom.includes('@')) {
   console.error("⚠️  WARNING: MAIL_FROM should be an email address, not a name!");
   console.error("⚠️  Current value:", mailFrom);
   console.error("⚠️  Example: MAIL_FROM=noreply@yourdomain.com");
 }
 
-let sentFrom = null;
-try {
-  if (mailFrom && mailFrom.includes('@')) {
-    sentFrom = new Sender(mailFrom, mailFromName);
-    console.log("✅ Sender created:", mailFrom, mailFromName);
-  }
-} catch (err) {
-  console.error("❌ Error creating Sender:", err);
-}
+const sentFrom = new Sender(
+  mailFrom,
+  mailFromName
+);
 
 async function sendEmail(to, subject, html) {
   try {
@@ -57,83 +50,31 @@ async function sendEmail(to, subject, html) {
       return false;
     }
 
-    if (!sentFrom) {
-      console.error("❌ Sender object is not initialized. Check MAIL_FROM configuration.");
-      return false;
-    }
-
-    console.log("📤 Preparing to send email:", {
-      from: mailFrom,
-      fromName: mailFromName,
-      to: to,
-      subject: subject
-    });
-
     const emailParams = new EmailParams()
       .setFrom(sentFrom)
       .setTo([{ email: to }])
       .setSubject(subject)
       .setHtml(html);
 
-    console.log("📤 Sending email via MailerSend...");
-    const result = await mailerSend.email.send(emailParams);
-    console.log("📧 MailerSend email sent successfully to:", to);
-    console.log("📧 MailerSend response:", result);
+    await mailerSend.email.send(emailParams);
+    console.log("📧 MailerSend email sent to:", to);
     return true;
   } catch (err) {
-    // Better error logging for MailerSend - handle different error structures
-    let errorMessage = 'Unknown error';
-    let errorStatus = null;
-    let errorData = null;
-    
-    // Try different ways to extract error info
-    if (err.message) {
-      errorMessage = err.message;
-    } else if (typeof err === 'string') {
-      errorMessage = err;
-    } else if (err.toString && err.toString() !== '[object Object]') {
-      errorMessage = err.toString();
-    }
-    
-    // Try to get status code
-    if (err.statusCode) {
-      errorStatus = err.statusCode;
-    } else if (err.status) {
-      errorStatus = err.status;
-    } else if (err.response?.status) {
-      errorStatus = err.response.status;
-    } else if (err.response?.statusCode) {
-      errorStatus = err.response.statusCode;
-    }
-    
-    // Try to get error data/body
-    if (err.body) {
-      errorData = err.body;
-    } else if (err.data) {
-      errorData = err.data;
-    } else if (err.response?.data) {
-      errorData = err.response.data;
-    } else if (err.response?.body) {
-      errorData = err.response.body;
-    }
-    
+    // Better error logging for MailerSend
     const errorDetails = {
-      message: errorMessage,
-      name: err.name || 'Error',
-      status: errorStatus,
+      message: err.message || 'Unknown error',
+      name: err.name,
+      status: err.response?.status || err.statusCode,
       statusText: err.response?.statusText,
-      data: errorData,
-      errorType: err.constructor?.name,
+      data: err.response?.data || err.body || err.data,
+      stack: err.stack,
       to: to,
       from: process.env.MAIL_FROM,
-      fromName: process.env.MAIL_FROM_NAME,
-      // Log the entire error structure
-      fullError: JSON.stringify(err, Object.getOwnPropertyNames(err), 2)
+      fromName: process.env.MAIL_FROM_NAME
     };
     
-    console.error("❌ MailerSend error details:", JSON.stringify(errorDetails, null, 2));
-    console.error("❌ Raw error object:", err);
-    console.error("❌ Error keys:", Object.keys(err || {}));
+    console.error("❌ MailerSend error:", JSON.stringify(errorDetails, null, 2));
+    console.error("❌ Full error object:", err);
     
     return false;
   }
@@ -240,20 +181,13 @@ export const sendOtp = async (req, res) => {
         userEmail: user.email || '❌ Missing'
       };
 
-      // Check if it's a domain verification error
-      const isDomainError = process.env.MAIL_FROM?.includes('gmail.com') || 
-                            process.env.MAIL_FROM?.includes('yahoo.com') ||
-                            process.env.MAIL_FROM?.includes('hotmail.com');
-
       return res.status(500).json({
         message: "Failed to send OTP",
         error: "MailerSend API error",
         debug: envCheck,
-        hint: isDomainError 
-          ? "Gmail/Yahoo/Hotmail domains cannot be verified. Use a custom domain or MailerSend test domain. See FIX_MAILERSEND_DOMAIN.md"
-          : process.env.MAIL_FROM && !process.env.MAIL_FROM.includes('@') 
-            ? "MAIL_FROM must be an email address (e.g., noreply@yourdomain.com), not a name"
-            : "Domain must be verified in MailerSend dashboard. Check server logs for details."
+        hint: process.env.MAIL_FROM && !process.env.MAIL_FROM.includes('@') 
+          ? "MAIL_FROM must be an email address (e.g., noreply@yourdomain.com), not a name"
+          : "Check server logs for detailed error message"
       });
     }
 
