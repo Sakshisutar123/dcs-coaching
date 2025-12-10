@@ -11,10 +11,27 @@ const mailerSend = new MailerSend({
   apiKey: process.env.MAILERSEND_API_KEY,
 });
 
-const sentFrom = new Sender(
-  process.env.MAIL_FROM,
-  process.env.MAIL_FROM_NAME || "DCS Coaching"
-);
+// Validate MAIL_FROM is set and is an email
+const mailFrom = process.env.MAIL_FROM;
+const mailFromName = process.env.MAIL_FROM_NAME || "DCS Coaching";
+
+if (!mailFrom) {
+  console.error("❌ MAIL_FROM environment variable is not set!");
+} else if (!mailFrom.includes('@')) {
+  console.error("⚠️  WARNING: MAIL_FROM should be an email address, not a name!");
+  console.error("⚠️  Current value:", mailFrom);
+  console.error("⚠️  Example: MAIL_FROM=noreply@yourdomain.com");
+}
+
+let sentFrom = null;
+try {
+  if (mailFrom && mailFrom.includes('@')) {
+    sentFrom = new Sender(mailFrom, mailFromName);
+    console.log("✅ Sender created:", mailFrom, mailFromName);
+  }
+} catch (err) {
+  console.error("❌ Error creating Sender:", err);
+}
 
 async function sendEmail(to, subject, html) {
   try {
@@ -29,10 +46,28 @@ async function sendEmail(to, subject, html) {
       return false;
     }
     
+    // Validate MAIL_FROM is an email, not a name
+    if (!process.env.MAIL_FROM.includes('@')) {
+      console.error("❌ MAIL_FROM must be an email address, not a name:", process.env.MAIL_FROM);
+      return false;
+    }
+    
     if (!to || !to.includes('@')) {
       console.error("❌ Invalid recipient email:", to);
       return false;
     }
+
+    if (!sentFrom) {
+      console.error("❌ Sender object is not initialized. Check MAIL_FROM configuration.");
+      return false;
+    }
+
+    console.log("📤 Preparing to send email:", {
+      from: mailFrom,
+      fromName: mailFromName,
+      to: to,
+      subject: subject
+    });
 
     const emailParams = new EmailParams()
       .setFrom(sentFrom)
@@ -40,18 +75,66 @@ async function sendEmail(to, subject, html) {
       .setSubject(subject)
       .setHtml(html);
 
-    await mailerSend.email.send(emailParams);
-    console.log("📧 MailerSend email sent to:", to);
+    console.log("📤 Sending email via MailerSend...");
+    const result = await mailerSend.email.send(emailParams);
+    console.log("📧 MailerSend email sent successfully to:", to);
+    console.log("📧 MailerSend response:", result);
     return true;
   } catch (err) {
-    console.error("❌ MailerSend error:", err.message);
-    console.error("❌ Error details:", {
-      message: err.message,
-      status: err.response?.status,
-      data: err.response?.data,
+    // Better error logging for MailerSend - handle different error structures
+    let errorMessage = 'Unknown error';
+    let errorStatus = null;
+    let errorData = null;
+    
+    // Try different ways to extract error info
+    if (err.message) {
+      errorMessage = err.message;
+    } else if (typeof err === 'string') {
+      errorMessage = err;
+    } else if (err.toString && err.toString() !== '[object Object]') {
+      errorMessage = err.toString();
+    }
+    
+    // Try to get status code
+    if (err.statusCode) {
+      errorStatus = err.statusCode;
+    } else if (err.status) {
+      errorStatus = err.status;
+    } else if (err.response?.status) {
+      errorStatus = err.response.status;
+    } else if (err.response?.statusCode) {
+      errorStatus = err.response.statusCode;
+    }
+    
+    // Try to get error data/body
+    if (err.body) {
+      errorData = err.body;
+    } else if (err.data) {
+      errorData = err.data;
+    } else if (err.response?.data) {
+      errorData = err.response.data;
+    } else if (err.response?.body) {
+      errorData = err.response.body;
+    }
+    
+    const errorDetails = {
+      message: errorMessage,
+      name: err.name || 'Error',
+      status: errorStatus,
+      statusText: err.response?.statusText,
+      data: errorData,
+      errorType: err.constructor?.name,
       to: to,
-      from: process.env.MAIL_FROM
-    });
+      from: process.env.MAIL_FROM,
+      fromName: process.env.MAIL_FROM_NAME,
+      // Log the entire error structure
+      fullError: JSON.stringify(err, Object.getOwnPropertyNames(err), 2)
+    };
+    
+    console.error("❌ MailerSend error details:", JSON.stringify(errorDetails, null, 2));
+    console.error("❌ Raw error object:", err);
+    console.error("❌ Error keys:", Object.keys(err || {}));
+    
     return false;
   }
 }
@@ -152,6 +235,7 @@ export const sendOtp = async (req, res) => {
       const envCheck = {
         MAILERSEND_API_KEY: process.env.MAILERSEND_API_KEY ? '✅ Set' : '❌ Missing',
         MAIL_FROM: process.env.MAIL_FROM || '❌ Missing',
+        MAIL_FROM_IS_EMAIL: process.env.MAIL_FROM?.includes('@') ? '✅ Valid' : '❌ Invalid (must be email address)',
         MAIL_FROM_NAME: process.env.MAIL_FROM_NAME || 'Not set (optional)',
         userEmail: user.email || '❌ Missing'
       };
@@ -160,7 +244,9 @@ export const sendOtp = async (req, res) => {
         message: "Failed to send OTP",
         error: "MailerSend API error",
         debug: envCheck,
-        hint: "Check server logs for detailed error message"
+        hint: process.env.MAIL_FROM && !process.env.MAIL_FROM.includes('@') 
+          ? "MAIL_FROM must be an email address (e.g., noreply@yourdomain.com), not a name"
+          : "Check server logs for detailed error message"
       });
     }
 
